@@ -1,4 +1,6 @@
-ctrader-open-api
 flask
+numpy
+pytz
+ctrader-open-api
 twisted
 protobuf
