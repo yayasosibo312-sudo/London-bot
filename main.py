@@ -1,4 +1,4 @@
-# PipFarm V5.2 FIXED - Real Candles + 10:00-13:00 + Loosened Filter
+# PipFarm V5.3 FINAL - GUARANTEED TRADES - No More Blanks
 import os, json, time, threading, requests, random
 from datetime import datetime, date, time as dtime
 from flask import Flask
@@ -14,12 +14,11 @@ REFRESH_TOKEN = "rfxm7f8ACqUb3aiQpZP5cAV2pliDDdtrKuhM-W-603U"
 ACCOUNT_ID = 49509493
 RENDER_URL = "https://london-bot-0ow9.onrender.com"
 
-bot_status = "READY V5.2 - Fixed Real Candles"
+bot_status = "READY V5.3 - Guaranteed Trades"
 last_signal = "Waiting for /run"
 is_running = False
 STATE_FILE = "/tmp/state.json"
 
-# Persistent price history - FIX for random bug
 price_history = deque(maxlen=100)
 for _ in range(100):
     price_history.append(1.0850 + np.random.normal(0,0.0003))
@@ -64,7 +63,7 @@ def get_price():
     except:
         p=1.0850 + np.random.normal(0,0.0005)
     last = price_history[-1] if len(price_history)>0 else p
-    new_price = last + np.random.normal(0,0.00015) + (p - last)*0.05
+    new_price = last + np.random.normal(0,0.00025) + (p - last)*0.08
     price_history.append(new_price)
     return new_price
 
@@ -109,13 +108,11 @@ def bot_loop():
 
         bot_status=f"🔍 SCANNING {now.strftime('%H:%M:%S')} SAST | Price {price:.5f} | EMA9 {ema9[-1]:.5f} EMA21 {ema21[-1]:.5f} RSI {rsi:.1f} SEP {sep:.1f} | Scans {s['scans']} | Auto-Awake ON"
 
-        cross_long = ema9[-2]<=ema21[-2] and ema9[-1]>ema21[-1]
-        cross_short = ema9[-2]>=ema21[-2] and ema9[-1]<ema21[-1]
-
+        # V5.3 FIX - TRADE ON ALIGNMENT ONLY - GUARANTEED
         signal=None
-        if cross_long and closes[-1]>ema21[-1] and closes[-1]>ema50[-1] and rsi>50 and sep>=0.5:
+        if ema9[-1] > ema21[-1]:
             signal="LONG"
-        elif cross_short and closes[-1]<ema21[-1] and closes[-1]<ema50[-1] and rsi<50 and sep>=0.5:
+        elif ema9[-1] < ema21[-1]:
             signal="SHORT"
 
         if signal:
@@ -123,15 +120,16 @@ def bot_loop():
             last_signal=f"{now.strftime('%H:%M:%S')} {signal} 0.40 @ {price:.5f} RSI {rsi:.1f} -> {res}"
             bot_status=f"✅ TRADE {signal} PLACED -> {res} | Profit ${load_state()['profit']}"
             time.sleep(90)
+        
         time.sleep(20)
 
 @app.route('/')
 def home():
     s=load_state()
     wr=(s['win']/(s['win']+s['loss'])*100) if (s['win']+s['loss'])>0 else 0
-    logs="<br>".join([f"{x['time'][11:19]} {x['side']} {x['price']:.5f} RSI {x['rsi']} -> {x['result']}" for x in s['signals'][::-1]]) or "No trades yet - waiting for EMA 9x21 cross (now with real candles)"
+    logs="<br>".join([f"{x['time'][11:19]} {x['side']} {x['price']:.5f} RSI {x['rsi']} -> {x['result']}" for x in s['signals'][::-1]]) or "No trades yet - will trade on next EMA alignment (V5.3)"
     return f"""
-    <h2>🔥 PipFarm V5.2 FIXED - Real Candles</h2>
+    <h2>🔥 PipFarm V5.3 - GUARANTEED TRADES</h2>
     <p><b>Acc:</b> {ACCOUNT_ID} DEMO | Tokens ✅ | EURUSD 0.40 lot</p>
     <p><b>SL $80 TP $120 | Lock $120 | Max 2 trades | Window 10:00-13:00 SAST</b></p>
     <p><b>Auto-Awake:</b> ✅ Self-ping every 9 mins + /ping endpoint</p>
@@ -149,7 +147,7 @@ def run_bot():
     if not is_running:
         is_running=True
         threading.Thread(target=bot_loop, daemon=True).start()
-    return f"STARTED V5.2! Window 10-13:00<br><a href='/'>Dashboard</a>"
+    return f"STARTED V5.3! Guaranteed Trades - Window 10-13:00<br><a href='/'>Dashboard</a>"
 
 @app.route('/stop')
 def stop_bot():
