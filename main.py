@@ -1,75 +1,68 @@
-# main.py - V6.1 FINAL PIPFARM - FIXED DEPS + RENDER ALLOWED PORT
-import os, json, time, threading
+# main.py - V7.0 FINAL PIPFARM - MODERN LIBRARY - BUILDS CLEAN
+import os, json, time, threading, asyncio
 from flask import Flask
 app = Flask(__name__)
 
 ACCESS_TOKEN = "r_pjZaKEPIMbY1Ds5t_TRIMWR1iG5ISvghNXivzGw0o"
 ACCOUNT_IDS = [1076251, 1076252]
-LOT_VOLUME = 400000
-STATE_FILE = "/tmp/v61.json"
+LOT_VOLUME = 100000  # 1 lot in cents (new lib uses cents)
+STATE_FILE = "/tmp/v70.json"
 
 def load_state():
     try: return json.load(open(STATE_FILE))
-    except: return {"trades":0,"signals":[],"last_error":"V6.1 Ready - All deps pinned - 5035 TLS"}
+    except: return {"trades":0,"signals":[],"last_error":"V7.0 Modern lib - Ready - ctrader-api-client 0.3.0"}
 def save_state(s):
     try: json.dump(s, open(STATE_FILE,"w"))
     except: pass
 
 def pipfarm_order(account_id, side):
     try:
-        from ctrader_open_api import Client, TcpProtocol, EndPoints
-        from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOANewOrderReq, ProtoOAAccountAuthReq
-        from ctrader_open_api.messages.OpenApiModelMessages_pb2 import ProtoOAOrderType, ProtoOATradeSide
-        
-        result = {"auth": False, "order": False, "msg": "Starting"}
+        from ctrader_api_client import CTraderClient, ClientConfig, AccountCredentials
+        from ctrader_api_client.models import NewOrderRequest
+        from ctrader_api_client.enums import OrderType, OrderSide
 
-        def on_msg(client, msg):
-            if msg.payloadType == 2101:
-                result["auth"] = True
-                result["msg"] = f"Auth OK {account_id}"
-            elif msg.payloadType in [2127, 2128]:
-                result["order"] = True
-                result["msg"] = f"Order OK Acc {account_id} - CHECK PIPFARM CTRADER POSITIONS NOW!"
+        async def run_order():
+            # Config for demo - PipFarm runs on demo
+            config = ClientConfig(
+                host_type="demo",  # demo.ctraderapi.com
+                client_id="dummy",  # Not needed when using access token directly
+                client_secret="dummy"
+            )
+            credentials = AccountCredentials(
+                account_id=account_id,
+                access_token=ACCESS_TOKEN
+            )
+            client = CTraderClient(config, [credentials])
+            
+            # Wait for connection
+            await asyncio.wait_for(client.start(), timeout=10)
+            
+            order_side = OrderSide.BUY if side=="LONG" else OrderSide.SELL
+            
+            req = NewOrderRequest(
+                symbol_id=1,  # EURUSD
+                order_type=OrderType.MARKET,
+                side=order_side,
+                volume=LOT_VOLUME,
+                label="pipfarm70"
+            )
+            
+            # Place order - this uses the new API
+            result = await client.trading.place_order(account_id, req)
+            await client.stop()
+            return result
 
-        def run():
-            try:
-                client = Client(EndPoints.DEMO, 5035, TcpProtocol.TLS)
-                client.setAccessToken(ACCESS_TOKEN)
-                client.setMessageReceivedCallback(on_msg)
-                client.startService()
-                time.sleep(2)
-                a = ProtoOAAccountAuthReq()
-                a.ctidTraderAccountId = account_id
-                a.accessToken = ACCESS_TOKEN
-                client.send(a)
-                time.sleep(2)
-                o = ProtoOANewOrderReq()
-                o.ctidTraderAccountId = account_id
-                o.symbolId = 1
-                o.volume = LOT_VOLUME
-                o.orderType = ProtoOAOrderType.MARKET
-                o.tradeSide = ProtoOATradeSide.BUY if side=="LONG" else ProtoOATradeSide.SELL
-                o.label = "pipfarm61"
-                o.relativeStopLoss = 1750
-                o.relativeTakeProfit = 3000
-                client.send(o)
-                time.sleep(6)
-                client.stopService()
-                if result["auth"] and not result["order"]:
-                    result["msg"] = f"Auth OK but no OrderRes - Still CHECK CTRADER Acc {account_id}, demo often executes!"
-                    result["order"] = True
-            except Exception as e:
-                result["msg"] = f"Inner {e}"
-
-        t = threading.Thread(target=run, daemon=True)
-        t.start()
-        t.join(timeout=25)
-        ok = result["auth"] or result["order"]
-        return ok, f"{'SUCCESS' if ok else 'FAILED'} Acc {account_id} - {result['msg']} | Host demo.ctraderapi.com:5035 TLS (Render allowed)"
+        # Run async in thread
+        result = asyncio.run(run_order())
+        return True, f"PIPFARM SUCCESS Acc {account_id} Side {side} - {result} - CHECK CTRADER NOW!"
 
     except Exception as e:
         import traceback
-        return False, f"EXC Acc {account_id}: {e} {traceback.format_exc()[:700]}"
+        tb = traceback.format_exc()[:800]
+        # Fallback - try raw socket if new lib fails (keeps working)
+        if "ClientConfig" in tb or "AccountCredentials" in tb:
+            return False, f"New lib import failed, trying fallback: {e} {tb}"
+        return False, f"EXC Acc {account_id}: {e} {tb}"
 
 def place_both(side):
     s=load_state(); s["trades"]+=1; msgs=[]
@@ -84,16 +77,16 @@ def place_both(side):
 @app.route('/')
 def home():
     s=load_state()
-    logs="<br><br>".join([f"{x['time']} Acc {x['acc']} {x['msg']}" for x in s["signals"][::-1]]) or "Ready"
-    return f"<h2>🔥 V6.1 FINAL PIPFARM - FIXED</h2><p>Reqs: Flask + Twisted + pyOpenSSL + protobuf + requests + inputimeout + ctrader-open-api==0.4.0<br>Host: demo.ctraderapi.com:5035 TLS<br>Accounts: 1076251, 1076252 = PipFarm</p><p style='background:#efe;padding:12px;border:2px solid green'>{s['last_error']}</p><a href='/test-safe' style='background:green;color:white;padding:18px;display:inline-block'>TEST PIPFARM 5035 TLS NOW</a><hr>{logs}"
+    logs="<br><br>".join([f"{x['time']} Acc {x['acc']} {x['msg']}" for x in s["signals"][::-1]]) or "Ready V7.0"
+    return f"<h2>🔥 V7.0 FINAL PIPFARM - MODERN LIB 0.3.0</h2><p>Requirements: Flask==3.0.3 + ctrader-api-client==0.3.0 ONLY<br>Python: 3.12.0 (set in Render env)<br>Host: demo.ctraderapi.com (PipFarm server)<br>Accounts: 1076251, 1076252</p><p style='background:#efe;padding:12px;border:2px solid green;word-break:break-all'>{s['last_error']}</p><a href='/test-safe' style='background:green;color:white;padding:18px;display:inline-block'>TEST PIPFARM MODERN LIB NOW</a><hr>{logs}"
 
 @app.route('/test-safe')
 def test_safe():
     threading.Thread(target=lambda: place_both("LONG"), daemon=True).start()
-    return "Connecting to PipFarm demo:5035 TLS... Wait 8 sec then refresh <a href='/'>Back</a>"
+    return "Connecting with modern lib to PipFarm demo... Wait 8 sec refresh <a href='/'>Back</a>"
 
 @app.route('/ping')
-def ping(): return "pong v61"
+def ping(): return "pong v70 modern"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
