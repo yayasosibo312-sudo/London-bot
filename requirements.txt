@@ -1,6 +1,5 @@
-flask
-numpy
-pytz
-ctrader-open-api
-twisted
-protobuf
+Flask==2.3.3
+requests==2.31.0
+ctrader-open-api==0.9.12
+protobuf==4.25.3
+Twisted==24.7.0
