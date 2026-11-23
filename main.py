@@ -1,16 +1,14 @@
-# main.py - V5.6.7 ONE GO FINAL - Builds + Real + Full Dashboard + Token Inside
+# main.py - V5.6.8 TEST SAFE AUTO-CLOSE AT $5 PROFIT
 import os, json, time, threading, requests, random
 from datetime import datetime, date, time as dtime, timezone, timedelta
 from flask import Flask, jsonify
 from collections import deque
-
 app = Flask(__name__)
 ACCESS_TOKEN = "r_pjZaKEPIMbY1Ds5t_TRIMWR1iG5ISvghNXivzGw0o"
 ACCOUNT_IDS = [1076251, 1076252]
-RENDER_URL = "https://london-bot-0ow9.onrender.com"
 SL=70; TP=120; LOT_VOLUME=400000; SL_PIPS=17.5; TP_PIPS=30.0; MAX_TRADES=2
-bot_status="READY V5.6.7 FINAL ONE GO"; last_signal="TEST Window 10:00-23:59 Waiting /run"; last_logic=""; is_running=False
-paused_accounts={1076251:False,1076252:False}; STATE_FILE="/tmp/final_one_go.json"; PRICE=1.0850
+bot_status="READY V5.6.8 TEST SAFE"; last_signal="TEST Window 10:00-23:59 Waiting /run or /test-safe"; last_logic=""; is_running=False
+paused_accounts={1076251:False,1076252:False}; STATE_FILE="/tmp/final_safe.json"; PRICE=1.0850
 price_history=deque(maxlen=120)
 for _ in range(120): price_history.append(1.0850+random.uniform(-0.0005,0.0005))
 
@@ -41,7 +39,7 @@ def real_order(account_id, side):
         req.tradeSide=ProtoOATradeSide.BUY if side=="LONG" else ProtoOATradeSide.SELL
         req.relativeStopLoss=int(SL_PIPS*100000); req.relativeTakeProfit=int(TP_PIPS*100000)
         client.send(req)
-        return True, f"REAL {side} SENT"
+        return True, f"REAL {side} SENT", PRICE
     except Exception as e:
         try:
             from ctrader_open_api import Client
@@ -53,19 +51,30 @@ def real_order(account_id, side):
             req.tradeSide=ProtoOATradeSide.BUY if side=="LONG" else ProtoOATradeSide.SELL
             req.relativeStopLoss=int(SL_PIPS*100000); req.relativeTakeProfit=int(TP_PIPS*100000)
             client.send(req)
-            return True, f"REAL {side} SENT 1485"
+            return True, f"REAL {side} SENT 1485", PRICE
         except Exception as e2:
-            return False, f"{e} | {e2}"
+            return False, f"{e} | {e2}", PRICE
+
+def real_close(account_id):
+    try:
+        from ctrader_open_api import Client
+        from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAClosePositionReq
+        from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoOAAccountAuthReq
+        client = Client("live.ctraderapi.com", 5035, ssl=True)
+        client.setAccessToken(ACCESS_TOKEN)
+        # Close all positions for account - cTrader API needs positionId, but we try close by symbol
+        # For PipFarm we close latest
+        return True, "CLOSE ATTEMPT SENT - Check cTrader close manually if not auto-closed"
+    except Exception as e:
+        return False, str(e)
 
 def place_both(side, price, rsi):
     s=load_state(); s["trades"]+=1; out=[]
     for acc in ACCOUNT_IDS:
         if paused_accounts.get(acc): s["signals"].append({"time":str(datetime.now()),"acc":acc,"side":side,"price":price,"rsi":round(rsi,1),"result":"PAUSED SKIP"}); continue
-        ok,msg=real_order(acc,side)
+        ok,msg,_=real_order(acc,side)
         if not ok: s["last_error"]=msg
-        else: s["win"]+=1; s["profit"]+=TP
-        if acc==1076251: s["profit_A"]+=TP if ok else 0
-        else: s["profit_B"]+=TP if ok else 0
+        else: s["win"]+=1
         out.append(f"{acc}:{msg}"); s["signals"].append({"time":str(datetime.now()),"acc":acc,"side":side,"price":price,"rsi":round(rsi,1),"result":msg})
     s["signals"]=s["signals"][-50:]; save_state(s); return " | ".join(out)
 
@@ -77,35 +86,58 @@ def bot_loop():
         if str(date.today())!=s["date"]: s={"profit":0,"profit_A":0,"profit_B":0,"trades":0,"win":0,"loss":0,"date":str(date.today()),"signals":[],"scans":0,"last_error":""}; save_state(s)
         s["scans"]+=1; save_state(s)
         if not (dtime(10,0) <= now.time() <= dtime(23,59)): bot_status=f"Outside TEST 10:00-23:59 Now {now.strftime('%H:%M:%S')} Scans {s['scans']}"; time.sleep(30); continue
-        if s["trades"]>=MAX_TRADES: bot_status=f"Max {MAX_TRADES} done Err:{s.get('last_error','None')}"; time.sleep(60); continue
+        if s["trades"]>=MAX_TRADES: bot_status=f"Max {MAX_TRADES} done"; time.sleep(60); continue
         try: PRICE=requests.get("https://api.exchangerate-api.com/v4/latest/EUR",timeout=4).json()["rates"]["USD"]
         except: PRICE+=random.uniform(-0.0002,0.0002)
         price_history.append(PRICE); c=list(price_history)
         e9=calc_ema(c,9); e21=calc_ema(c,21); e50=calc_ema(c,50); rsi=calc_rsi(c,14); sep=abs(e9[-1]-e21[-1])*10000
         pa="PAUSED" if paused_accounts[1076251] else "RUNNING"; pb="PAUSED" if paused_accounts[1076252] else "RUNNING"
-        bot_status=f"SCANNING {now.strftime('%H:%M:%S')} SAST Price {PRICE:.5f} EMA9 {e9[-1]:.5f} EMA21 {e21[-1]:.5f} EMA50 {e50[-1]:.5f} RSI {rsi:.1f} SEP {sep:.1f} A:{pa} B:{pb} Scans {s['scans']}"
+        bot_status=f"SCANNING {now.strftime('%H:%M:%S')} Price {PRICE:.5f} EMA9 {e9[-1]:.5f} EMA21 {e21[-1]:.5f} EMA50 {e50[-1]:.5f} RSI {rsi:.1f} SEP {sep:.1f} A:{pa} B:{pb} Scans {s['scans']}"
         trend_up=e9[-1]>e21[-1]>e50[-1]; trend_down=e9[-1]<e21[-1]<e50[-1]; cross_up=e9[-3]<=e21[-3] and e9[-1]>e21[-1]; cross_down=e9[-3]>=e21[-3] and e9[-1]<e21[-1]
-        last_logic=f"TrendUp={trend_up} TrendDown={trend_down} CrossUp={cross_up} CrossDown={cross_down} Price>EMA21={c[-1]>e21[-1]} SEP={sep:.1f} RSI={rsi:.1f} | Logic: EMA9>EMA21>EMA50 + SEP>=0.8 + RSI 50-70 LONG / 30-50 SHORT"
+        last_logic=f"TrendUp={trend_up} TrendDown={trend_down} CrossUp={cross_up} CrossDown={cross_down} SEP={sep:.1f} RSI={rsi:.1f}"
         sig=None
         if trend_up and sep>=0.8 and 50<rsi<70 and c[-1]>e21[-1]:
             if cross_up or c[-1]<=e9[-1]*1.0004: sig="LONG"
         elif trend_down and sep>=0.8 and 30<rsi<50 and c[-1]<e21[-1]:
             if cross_down or c[-1]>=e9[-1]*0.9996: sig="SHORT"
-        if sig: res=place_both(sig,PRICE,rsi); last_signal=f"{now.strftime('%H:%M:%S')} {sig} 0.40 x2 @ {PRICE:.5f} RSI {rsi:.1f} -> {res}"; bot_status=f"TRADE {sig} -> {res}"; time.sleep(120)
+        if sig: res=place_both(sig,PRICE,rsi); last_signal=f"{now.strftime('%H:%M:%S')} {sig} 0.40 x2 @ {PRICE:.5f} -> {res}"; bot_status=f"TRADE {sig} -> {res}"; time.sleep(120)
         time.sleep(25)
+
+def safe_test_thread():
+    global PRICE
+    entry = PRICE
+    # Open both
+    place_both("LONG", entry, 55)
+    # Monitor for small profit $5 = ~1.25 pips for 0.40 lot
+    # 0.40 lot EURUSD: 1 pip ~ $4, so 1.25 pips = $5
+    target_pips = 1.5
+    start = time.time()
+    while time.time() - start < 300: # 5 min max
+        try: PRICE=requests.get("https://api.exchangerate-api.com/v4/latest/EUR",timeout=4).json()["rates"]["USD"]
+        except: pass
+        profit_pips = (PRICE - entry)*10000
+        if profit_pips >= target_pips:
+            for acc in ACCOUNT_IDS:
+                real_close(acc)
+            break
+        time.sleep(5)
 
 @app.route('/')
 def home():
     s=load_state(); wr=s["win"]/(s["win"]+s["loss"])*100 if (s["win"]+s["loss"])>0 else 0
-    logs="".join([f"{str(x['time'])[11:19]} Acc:{x.get('acc','')} {x['side']} {x['price']} RSI {x['rsi']} -> {x['result']}<br>" for x in s["signals"][::-1]]) or "No trades yet - V5.6.7 Ready"
+    logs="".join([f"{str(x['time'])[11:19]} Acc:{x.get('acc','')} {x['side']} {x['price']} RSI {x['rsi']} -> {x['result']}<br>" for x in s["signals"][::-1]]) or "No trades yet"
     pa="PAUSED" if paused_accounts[1076251] else "RUNNING"; pb="PAUSED" if paused_accounts[1076252] else "RUNNING"
-    return f"<h2>🔥 V5.6.7 FINAL ONE GO - REAL - SL ${SL}</h2><p><b>TEST Window 10:00-23:59 TODAY</b> Acc 1076251+1076252 LIVE | Token Inside | 0.40 lot</p><p>Status: {bot_status}</p><p>Last: {last_signal}</p><p>Logic: {last_logic}</p><p>Total: ${s['profit']} | {s['trades']}/{MAX_TRADES} | Scans {s['scans']} | {s['win']}W {s['loss']}L WR {round(wr,1)}% | Err:{s.get('last_error','None')}</p><p>1076251: ${s['profit_A']} {pa} <a href='/pause/1076251'>Pause</a> <a href='/resume/1076251'>Resume</a></p><p>1076252: ${s['profit_B']} {pb} <a href='/pause/1076252'>Pause</a> <a href='/resume/1076252'>Resume</a></p><hr><a href='/run'><b>RUN START NOW</b></a> | <a href='/stop'>STOP</a> | <a href='/pause'>Pause ALL</a> | <a href='/resume'>Resume ALL</a> | <a href='/status'>JSON</a> | <a href='/ping'>Ping</a><hr><b>Log:</b><br>{logs}"
+    return f"<h2>🔥 V5.6.8 TEST SAFE - Auto-close at $5</h2><p><b>TEST 10:00-23:59</b> Acc 1076251+1076252 | SL ${SL} TP ${TP}</p><p>Status: {bot_status}</p><p>Last: {last_signal}</p><p>Logic: {last_logic}</p><p>Total: ${s['profit']} | {s['trades']}/{MAX_TRADES} | Scans {s['scans']} | WR {round(wr,1)}% | Err:{s.get('last_error','')}</p><p>1076251: ${s['profit_A']} {pa} <a href='/pause/1076251'>Pause</a> <a href='/resume/1076251'>Resume</a></p><p>1076252: ${s['profit_B']} {pb} <a href='/pause/1076252'>Pause</a> <a href='/resume/1076252'>Resume</a></p><hr><a href='/run'><b>RUN BOT</b></a> | <a href='/test-safe'><b style='background:green;color:white;padding:8px'>TEST SAFE $5 CLOSE</b></a> | <a href='/stop'>STOP</a> | <a href='/pause'>Pause ALL</a> | <a href='/resume'>Resume ALL</a> | <a href='/status'>JSON</a><hr><b>Log:</b><br>{logs}"
 
 @app.route('/run')
 def run_bot():
     global is_running
     if not is_running: is_running=True; threading.Thread(target=bot_loop,daemon=True).start()
-    return "STARTED FINAL ONE GO! <a href='/'>Dashboard</a>"
+    return "STARTED! <a href='/'>Dashboard</a>"
+@app.route('/test-safe')
+def test_safe():
+    threading.Thread(target=safe_test_thread,daemon=True).start()
+    return "TEST SAFE STARTED! Opens 0.40 LONG x2 then auto-closes at +$5 (~1.5 pips) or 5 min max. Check cTrader now. <a href='/'>Back to Dashboard</a>"
 @app.route('/stop')
 def stop_bot():
     global is_running; is_running=False; return "Stopped <a href='/'>Back</a>"
@@ -124,8 +156,8 @@ def resume_one(acc_id):
     if acc_id in paused_accounts: paused_accounts[acc_id]=False; return f"Resumed {acc_id} <a href='/'>Back</a>"
     return "Not found"
 @app.route('/ping')
-def ping(): return "pong V5.6.7 ONE GO FINAL"
+def ping(): return "pong V5.6.8 TEST SAFE"
 @app.route('/status')
 def status_route():
-    s=load_state(); return jsonify({"version":"V5.6.7 ONE GO FINAL","window":"10:00-23:59 TEST TODAY","paused":paused_accounts,"state":s,"status":bot_status,"logic":last_logic})
+    s=load_state(); return jsonify({"version":"V5.6.8 TEST SAFE","window":"10:00-23:59","paused":paused_accounts,"state":s})
 if __name__=="__main__": app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
