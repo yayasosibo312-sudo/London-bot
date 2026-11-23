@@ -1,5 +1,4 @@
 Flask==2.3.3
 requests
-websocket-client==1.6.4
+ctrader-open-api
 protobuf==4.25.3
-git+https://github.com/spotware/open-api-python.git@master
