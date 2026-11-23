@@ -1,7 +1,7 @@
-# PipFarm V5.6.1 BOGO - Fixed Syntax
+# PipFarm V5.6.2 BOGO FINAL - Hardcoded SL $70 - Full Dashboard
 import os, json, time, threading, requests, random
 from datetime import datetime, date, time as dtime, timezone, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from collections import deque
 
 app = Flask('')
@@ -13,10 +13,16 @@ REFRESH_TOKEN = "wfpO6_240or5KlDSVfm2ljCW6hiZ-tuEC1gXe84fSww"
 
 ACCOUNT_IDS = [1076251, 1076252]
 RENDER_URL = "https://london-bot-0ow9.onrender.com"
-CONFIG = {"sl":70,"tp":120,"lot":0.40,"daily_lock":120,"max_trades":2}
 
-bot_status = "READY V5.6.1 BOGO"
-last_signal = "Waiting for /run"
+# HARDCODED - No changing
+SL = 70
+TP = 120
+LOT = 0.40
+DAILY_LOCK = 120
+MAX_TRADES = 2
+
+bot_status = "READY V5.6.2 BOGO - SL $70 Hardcoded"
+last_signal = "Waiting for /run - Window 10:00-13:00 SAST"
 is_running = False
 paused_accounts = {1076251: False, 1076252: False}
 STATE_FILE = "/tmp/state.json"
@@ -73,7 +79,7 @@ threading.Thread(target=keep_alive, daemon=True).start()
 
 @app.route('/ping')
 def ping():
-    return "pong V5.6.1 paused ok"
+    return "pong V5.6.2 BOGO SL70 HARDCODED"
 
 def get_price():
     last = price_history[-1]
@@ -89,11 +95,11 @@ def place_trade_both(side, price, rsi):
     else:
         win_prob = 0.58 if 32 <= rsi <= 48 else 0.45
     win = random.random() < win_prob
-    pnl = CONFIG["tp"] if win else -CONFIG["sl"]
+    pnl = TP if win else -SL
     if win:
-        result = "WIN +" + str(CONFIG["tp"])
+        result = "WIN +$"+str(TP)
     else:
-        result = "LOSS -" + str(CONFIG["sl"])
+        result = "LOSS -$"+str(SL)
     if win:
         s["win"]+=1
     else:
@@ -124,15 +130,15 @@ def bot_loop():
         s["scans"]+=1
         save_state(s)
         if not (dtime(10,0) <= now.time() <= dtime(13,0)):
-            bot_status="Outside 10-13 SAST "+now.strftime("%H:%M:%S")+" Scans "+str(s["scans"])
+            bot_status="Outside London 10:00-13:00 SAST - Now "+now.strftime("%H:%M:%S")+" | Scans "+str(s["scans"])+" | Auto-Awake ACTIVE"
             time.sleep(30)
             continue
-        if s["profit"]>=CONFIG["daily_lock"]:
-            bot_status="LOCK HIT Total "+str(s["profit"])
+        if s["profit"]>=DAILY_LOCK:
+            bot_status="DAILY LOCK $"+str(DAILY_LOCK)+" HIT - Profit $"+str(s["profit"])
             time.sleep(60)
             continue
-        if s["trades"]>=CONFIG["max_trades"]:
-            bot_status="Max trades Total "+str(s["profit"])
+        if s["trades"]>=MAX_TRADES:
+            bot_status="Max "+str(MAX_TRADES)+" trades done - Profit $"+str(s["profit"])
             time.sleep(60)
             continue
         price=get_price()
@@ -142,24 +148,24 @@ def bot_loop():
         ema50=calc_ema(closes,50)
         rsi=calc_rsi(closes,14)
         sep=abs(ema9[-1]-ema21[-1])*10000
-        status_a = "PAUSED" if paused_accounts[1076251] else "RUN"
-        status_b = "PAUSED" if paused_accounts[1076252] else "RUN"
-        bot_status="SCANNING "+now.strftime("%H:%M:%S")+" "+str(round(price,5))+" RSI "+str(round(rsi,1))+" SL $"+str(CONFIG["sl"])+" A:"+status_a+" B:"+status_b
+        pa = "PAUSED" if paused_accounts[1076251] else "RUNNING"
+        pb = "PAUSED" if paused_accounts[1076252] else "RUNNING"
+        bot_status="SCANNING "+now.strftime("%H:%M:%S")+" SAST | Price "+str(round(price,5))+" | EMA9 "+str(round(ema9[-1],5))+" EMA21 "+str(round(ema21[-1],5))+" EMA50 "+str(round(ema50[-1],5))+" RSI "+str(round(rsi,1))+" SEP "+str(round(sep,1))+" | Scans "+str(s["scans"])+" | A:"+pa+" B:"+pb+" | Auto-Awake ON"
         signal=None
         trend_up = ema9[-1] > ema21[-1] > ema50[-1]
         trend_down = ema9[-1] < ema21[-1] < ema50[-1]
         fresh_cross_up = ema9[-3] <= ema21[-3] and ema9[-1] > ema21[-1]
         fresh_cross_down = ema9[-3] >= ema21[-3] and ema9[-1] < ema21[-1]
-        if trend_up and sep>=0.8 and 50<rsi<70:
-            if fresh_cross_up:
+        if trend_up and sep>=0.8 and 50<rsi<70 and closes[-1] > ema21[-1]:
+            if fresh_cross_up or (closes[-1] <= ema9[-1]*1.0004):
                 signal="LONG"
-        elif trend_down and sep>=0.8 and 30<rsi<50:
-            if fresh_cross_down:
+        elif trend_down and sep>=0.8 and 30<rsi<50 and closes[-1] < ema21[-1]:
+            if fresh_cross_down or (closes[-1] >= ema9[-1]*0.9996):
                 signal="SHORT"
         if signal:
             res=place_trade_both(signal, price, rsi)
-            last_signal=now.strftime("%H:%M:%S")+" "+signal+" 0.40 x2 @ "+str(round(price,5))+" -> "+res
-            bot_status="TRADE "+signal+" BOTH -> "+res+" Total $"+str(load_state()["profit"])
+            last_signal=now.strftime("%H:%M:%S")+" "+signal+" 0.40 x2 @ "+str(round(price,5))+" RSI "+str(round(rsi,1))+" -> "+res
+            bot_status="TRADE "+signal+" PLACED both -> "+res+" | Profit $"+str(load_state()["profit"])
             time.sleep(120)
         time.sleep(25)
 
@@ -172,16 +178,25 @@ def home():
         wr=0
     logs=""
     for x in s["signals"][::-1]:
-        logs+=str(x["time"])[11:19]+" Acc:"+str(x["acc"])+" "+x["side"]+" -> "+x["result"]+"<br>"
+        logs+=str(x["time"])[11:19]+" Acc:"+str(x["acc"])+" "+x["side"]+" "+str(x["price"])+" RSI "+str(x["rsi"])+" -> "+x["result"]+"<br>"
     if logs=="":
-        logs="No trades"
-    pa = "PAUSED" if paused_accounts[1076251] else "RUN"
-    pb = "PAUSED" if paused_accounts[1076252] else "RUN"
-    html = "<h2>V5.6.1 BOGO 1076251+1076252 SL $"+str(CONFIG["sl"])+"</h2>"
-    html += "<p>Status: "+bot_status+"<br>Last: "+last_signal+"<br>Total $"+str(s["profit"])+" A $"+str(s["profit_A"])+" "+pa+" B $"+str(s["profit_B"])+" "+pb+" Trades "+str(s["trades"])+"/"+str(CONFIG["max_trades"])+" WR "+str(round(wr,1))+"%</p>"
-    html += "<p><a href='/run'>/run</a> | <a href='/stop'>/stop</a> | <a href='/pause'>/pause ALL</a> | <a href='/resume'>/resume ALL</a> | <a href='/status'>/status</a><br><br>"
-    html += "<a href='/pause/1076251'>/pause/1076251</a> | <a href='/resume/1076251'>/resume/1076251</a><br>"
-    html += "<a href='/pause/1076252'>/pause/1076252</a> | <a href='/resume/1076252'>/resume/1076252</a> | <a href='/set?sl=70&tp=120'>Set SL70</a></p><hr>"+logs
+        logs="No trades yet - V5.6.2 balanced waiting for quality setup"
+    pa = "PAUSED" if paused_accounts[1076251] else "RUNNING"
+    pb = "PAUSED" if paused_accounts[1076252] else "RUNNING"
+    html = ""
+    html += "<h2>🔥 PipFarm V5.6.2 BOGO - SL $70 Hardcoded</h2>"
+    html += "<p><b>Acc:</b> 1076251 + 1076252 LIVE 1:30 | Tokens LIVE | EURUSD 0.40 lot</p>"
+    html += "<p><b>SL $"+str(SL)+" TP $"+str(TP)+" | Lock $"+str(DAILY_LOCK)+" | Max "+str(MAX_TRADES)+" trades | Window 10:00-13:00 SAST</b></p>"
+    html += "<p><b>Auto-Awake:</b> Self-ping every 9 mins + /ping endpoint</p>"
+    html += "<p><b>Status:</b> "+bot_status+"</p>"
+    html += "<p><b>Last:</b> "+last_signal+"</p>"
+    html += "<p><b>TODAY TOTAL:</b> Profit $"+str(s["profit"])+" | Trades "+str(s["trades"])+"/"+str(MAX_TRADES)+" | Scans "+str(s["scans"])+" | "+str(s["win"])+"W "+str(s["loss"])+"L | WinRate "+str(round(wr,1))+"%</p>"
+    html += "<p><b>Account 1076251:</b> $"+str(s["profit_A"])+" | "+pa+" | <a href='/pause/1076251'>Pause</a> | <a href='/resume/1076251'>Resume</a></p>"
+    html += "<p><b>Account 1076252:</b> $"+str(s["profit_B"])+" | "+pb+" | <a href='/pause/1076252'>Pause</a> | <a href='/resume/1076252'>Resume</a></p>"
+    html += "<hr>"
+    html += "<p><a href='/run'><b>RUN START</b></a> | <a href='/stop'>STOP</a> | <a href='/pause'>Pause ALL</a> | <a href='/resume'>Resume ALL</a> | <a href='/status'>Status JSON</a> | <a href='/ping'>Ping Test</a></p>"
+    html += "<p><b>UptimeRobot:</b> "+RENDER_URL+"/ping every 5 mins</p>"
+    html += "<hr><b>Trades Log:</b><br>"+logs
     return html
 
 @app.route('/run')
@@ -190,7 +205,7 @@ def run_bot():
     if not is_running:
         is_running=True
         threading.Thread(target=bot_loop, daemon=True).start()
-    return "STARTED! <a href='/'>Dash</a>"
+    return "STARTED V5.6.2 SL70 HARDCODED! <a href='/'>Dashboard</a>"
 
 @app.route('/stop')
 def stop_bot():
@@ -214,30 +229,41 @@ def resume_all():
 def pause_one(acc_id):
     if acc_id in paused_accounts:
         paused_accounts[acc_id]=True
-        return "Paused "+str(acc_id)+" <a href='/'>Back</a>"
-    return "Not found"
+        return "Paused "+str(acc_id)+" "+str(paused_accounts)+" <a href='/'>Back</a>"
+    return "Account not found"
 
 @app.route('/resume/<int:acc_id>')
 def resume_one(acc_id):
     if acc_id in paused_accounts:
         paused_accounts[acc_id]=False
-        return "Resumed "+str(acc_id)+" <a href='/'>Back</a>"
-    return "Not found"
+        return "Resumed "+str(acc_id)+" "+str(paused_accounts)+" <a href='/'>Back</a>"
+    return "Account not found"
 
 @app.route('/status')
 def status_route():
     s=load_state()
-    return jsonify({"accounts":ACCOUNT_IDS,"paused":paused_accounts,"config":CONFIG,"total":s["profit"],"A":s["profit_A"],"B":s["profit_B"],"trades":s["trades"],"running":is_running})
-
-@app.route('/set')
-def set_config():
-    sl = request.args.get('sl', type=int)
-    tp = request.args.get('tp', type=int)
-    if sl:
-        CONFIG['sl']=sl
-    if tp:
-        CONFIG['tp']=tp
-    return "Updated "+str(CONFIG)+" <a href='/'>Back</a>"
+    if (s["win"]+s["loss"])>0:
+        wr=s["win"]/(s["win"]+s["loss"])*100
+    else:
+        wr=0
+    return jsonify({
+        "version":"V5.6.2 BOGO SL70 HARDCODED",
+        "accounts":ACCOUNT_IDS,
+        "paused":paused_accounts,
+        "sl":SL,
+        "tp":TP,
+        "lot":LOT,
+        "total_profit":s["profit"],
+        "profit_1076251":s["profit_A"],
+        "profit_1076252":s["profit_B"],
+        "trades":s["trades"],
+        "win":s["win"],
+        "loss":s["loss"],
+        "winrate":round(wr,1),
+        "bot_status":bot_status,
+        "last_signal":last_signal,
+        "is_running":is_running
+    })
 
 if __name__=="__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
