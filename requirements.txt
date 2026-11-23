@@ -1,4 +1,3 @@
 Flask==2.3.3
 protobuf==3.20.3
-Twisted==22.10.0
-ctrader-open-api==0.1.14
+ctrader-open-api
