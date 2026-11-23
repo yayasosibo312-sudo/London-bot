@@ -1,2 +1,1 @@
 Flask==3.0.3
-ctrader-api-client==0.3.0
